@@ -1,0 +1,86 @@
+# huion-mgr configuration example for the Huion H951P.
+# Copy this file to ~/.config/huion-mgr/config.toml or run:
+#   huion-mgr config generate
+
+tablet_name = "HUION Huion Tablet_H951P"
+
+# Mode selector buttons change the active mode. They normally do not execute
+# an action themselves.
+[[express_keys]]
+key = "mode1"
+name = "Mode 1"
+action = { type = "none" }
+
+[[express_keys]]
+key = "mode2"
+name = "Mode 2"
+action = { type = "none" }
+
+[[express_keys]]
+key = "mode3"
+name = "Mode 3"
+action = { type = "none" }
+
+# Keyboard shortcut actions use wtype.
+[[express_keys]]
+key = "top-button1"
+name = "Undo in mode 1"
+mode = "mode1"
+action = { type = "combo", value = "ctrl+z" }
+
+[[express_keys]]
+key = "top-button1"
+name = "Redo in mode 2"
+mode = "mode2"
+action = { type = "combo", value = "ctrl+y" }
+
+[[express_keys]]
+key = "top-button1"
+name = "Save in mode 3"
+mode = "mode3"
+action = { type = "combo", value = "ctrl+s" }
+
+[[express_keys]]
+key = "top-button2"
+name = "Next tab"
+action = { type = "combo", value = "ctrl+tab" }
+
+# Single key actions also use wtype.
+[[express_keys]]
+key = "top-button3"
+name = "Enter"
+action = { type = "key", value = "Return" }
+
+# Scroll actions generate mouse-wheel events, not keyboard arrows.
+[[express_keys]]
+key = "scroll-up"
+name = "Scroll up"
+action = { type = "scroll", value = "up" }
+
+[[express_keys]]
+key = "scroll-down"
+name = "Scroll down"
+action = { type = "scroll", value = "down" }
+
+# Mouse actions use ydotool. Values: left, right, middle.
+[[express_keys]]
+key = "bottom-button1"
+name = "Left click"
+action = { type = "mouse", value = "left" }
+
+[[express_keys]]
+key = "bottom-button2"
+name = "Right click"
+action = { type = "mouse", value = "right" }
+
+# Shell commands run through sh -c. Only use trusted commands.
+[[express_keys]]
+key = "bottom-button3"
+name = "Open terminal"
+action = { type = "command", value = "alacritty" }
+
+# Hyprland dispatch actions use hyprctl dispatch.
+[[express_keys]]
+key = "bottom-button4"
+name = "Next workspace"
+action = { type = "hyprctl", value = "dispatch workspace e+1" }
