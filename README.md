@@ -58,6 +58,18 @@ cargo build --release
 sudo install -Dm755 target/release/huion-mgr /usr/local/bin/huion-mgr
 ```
 
+For a guided installation and validation, run this as your normal desktop
+user:
+
+```bash
+./setup.sh
+```
+
+The script builds and tests the release binary, installs it when passwordless
+`sudo` is available, generates the user config if missing, enables the user
+`ydotool` service, checks Huion HID access, and prints manual commands for any
+step it cannot complete. It never installs packages automatically.
+
 ## Config file
 
 By default the file is:
