@@ -1,6 +1,6 @@
 [package]
 name = "huion-mgr"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Huion tablet manager for Linux (CLI + daemon)"
 
