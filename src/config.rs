@@ -64,6 +64,10 @@ pub enum Action {
     /// Simulate a mouse-wheel scroll (up or down).
     #[serde(rename = "scroll")]
     MouseScroll(String),
+    /// Huion pan: hold button to drag board with pen (two-finger move emulation).
+    /// Value examples: `pan` (middle-drag), `pan:left`, `pan:1.5`, `pan:left:0.8`
+    #[serde(rename = "huion")]
+    Huion(String),
     /// Disabled
     #[serde(rename = "none")]
     None,
@@ -75,6 +79,9 @@ impl Action {
         let spec = spec.trim();
         if spec == "none" {
             return Ok(Self::None);
+        }
+        if matches!(spec.to_ascii_lowercase().as_str(), "huion" | "pan" | "drag") {
+            return Ok(Self::Huion("pan".into()));
         }
 
         let (kind, value) = spec
@@ -92,9 +99,10 @@ impl Action {
             "hyprctl" | "h" => Ok(Self::Hyprctl(value.to_string())),
             "mouse" | "m" => Ok(Self::MouseClick(value.to_string())),
             "scroll" | "wheel" | "s" => Ok(Self::MouseScroll(value.to_string())),
+            "huion" | "pan" | "drag" => Ok(Self::Huion(value.to_string())),
             "none" => Err("none does not accept a value; use 'none'".to_string()),
             _ => Err(format!(
-                "unknown action type '{kind}'; use combo, key, command, hyprctl, mouse, scroll, or none"
+                "unknown action type '{kind}'; use combo, key, command, hyprctl, mouse, scroll, huion, or none"
             )),
         }
     }
@@ -138,6 +146,8 @@ fn default_keybindings() -> Vec<KeyBinding> {
         ("bottom-button2", "Bottom Button 2"),
         ("bottom-button3", "Bottom Button 3"),
         ("bottom-button4", "Bottom Button 4"),
+        ("pen-button1", "Pen Button 1"),
+        ("pen-button2", "Pen Button 2"),
     ]
     .into_iter()
     .map(|(key, name)| KeyBinding {
