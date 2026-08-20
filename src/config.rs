@@ -149,6 +149,98 @@ fn default_keybindings() -> Vec<KeyBinding> {
     .collect()
 }
 
+/// Render the config as compact, readable TOML.
+///
+/// `toml::to_string_pretty` expands every action into a nested
+/// `[express_keys.action]` block; inline tables keep one binding per entry.
+pub fn render_config(config: &AppConfig) -> String {
+    let mut out =
+        String::from("# huion-mgr configuration. Edit and restart the daemon to apply.\n\n");
+    out.push_str(&format!(
+        "tablet_name = {}\n\n",
+        toml_str(&config.tablet_name)
+    ));
+
+    for binding in &config.express_keys {
+        out.push_str("[[express_keys]]\n");
+        out.push_str(&format!("key = {}\n", toml_str(&binding.key)));
+        out.push_str(&format!("name = {}\n", toml_str(&binding.name)));
+        if let Some(mode) = &binding.mode {
+            out.push_str(&format!("mode = {}\n", toml_str(mode)));
+        }
+        out.push_str(&format!("action = {}\n\n", render_action(&binding.action)));
+    }
+
+    out.push_str("[pen]\n");
+    let curve = config
+        .pen
+        .pressure_curve
+        .iter()
+        .map(|point| format!("[{}, {}]", f32_str(point[0]), f32_str(point[1])))
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!("pressure_curve = [{curve}]\n"));
+    out.push_str(&format!("output = {}\n\n", toml_str(&config.pen.output)));
+
+    if let Some(hyprland) = &config.hyprland {
+        out.push_str("[hyprland]\n");
+        if let Some(monitor) = &hyprland.monitor {
+            out.push_str(&format!("monitor = {}\n", toml_str(monitor)));
+        }
+        if let Some(region) = &hyprland.region {
+            let region = region
+                .iter()
+                .map(|v| f32_str(*v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!("region = [{region}]\n"));
+        }
+    }
+
+    out
+}
+
+/// TOML basic string with escaping.
+fn toml_str(value: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// f32 as TOML float text; bare integers are invalid for a float field.
+fn f32_str(value: f32) -> String {
+    let text = format!("{value}");
+    if text.contains(['.', 'e', 'E']) {
+        text
+    } else {
+        format!("{text}.0")
+    }
+}
+
+fn render_action(action: &Action) -> String {
+    let (kind, value) = match action {
+        Action::None => return "{ type = \"none\" }".to_string(),
+        Action::KeyCombo(value) => ("combo", value),
+        Action::KeyPress(value) => ("key", value),
+        Action::Command(value) => ("command", value),
+        Action::Hyprctl(value) => ("hyprctl", value),
+        Action::MouseClick(value) => ("mouse", value),
+        Action::MouseScroll(value) => ("scroll", value),
+    };
+    format!("{{ type = \"{kind}\", value = {} }}", toml_str(value))
+}
+
 impl AppConfig {
     pub fn config_dir() -> PathBuf {
         dirs::config_dir()
@@ -185,8 +277,7 @@ impl AppConfig {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
         }
-        let content =
-            toml::to_string_pretty(self).map_err(|e| format!("failed to serialize config: {e}"))?;
+        let content = render_config(self);
         std::fs::write(path, content)
             .map_err(|e| format!("failed to write {}: {e}", path.display()))
     }
@@ -245,8 +336,37 @@ mod tests {
     #[test]
     fn config_round_trips_readable_actions() {
         let config = AppConfig::default();
-        let text = toml::to_string_pretty(&config).unwrap();
-        assert!(text.contains("type = \"none\""));
+        let text = render_config(&config);
+        assert!(text.contains("action = { type = \"none\" }"));
+        assert!(!text.contains("[express_keys.action]"));
+        let decoded: AppConfig = toml::from_str(&text).unwrap();
+        assert_eq!(decoded, config);
+    }
+
+    #[test]
+    fn render_uses_inline_action_tables() {
+        let mut config = AppConfig::default();
+        config.express_keys = vec![
+            KeyBinding {
+                key: "KEY_I".into(),
+                name: "top-button4".into(),
+                mode: Some("mode1".into()),
+                action: Action::KeyCombo("ctrl+z".into()),
+            },
+            KeyBinding {
+                key: "KEY_B".into(),
+                name: "left click".into(),
+                mode: None,
+                action: Action::MouseClick("left".into()),
+            },
+        ];
+        config.pen.pressure_curve = vec![[0.0, 0.15], [1.0, 1.0]];
+        let text = render_config(&config);
+        assert!(text.contains("action = { type = \"combo\", value = \"ctrl+z\" }"));
+        assert!(text.contains("action = { type = \"mouse\", value = \"left\" }"));
+        assert!(text.contains("pressure_curve = [[0.0, 0.15], [1.0, 1.0]]"));
+        // No nested action sub-tables anywhere.
+        assert!(!text.contains("[express_keys.action]"));
         let decoded: AppConfig = toml::from_str(&text).unwrap();
         assert_eq!(decoded, config);
     }

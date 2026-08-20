@@ -1,9 +1,10 @@
 # huion-mgr
 
 A Linux CLI for configuring Huion tablet express keys with a TOML file. For
-the H951P it reads the vendor HID reports used by the official driver and runs
-configured actions when a key is pressed. The current default device pattern
-detects the Huion H951P.
+the H951P it reads the vendor HID reports used by the official driver, and it
+also monitors the tablet's keyboard interface, where the express keys surface
+as plain keyboard keys (`KEY_I`, `KEY_E`, ...). The current default device
+pattern detects the Huion H951P.
 
 ## Requirements
 
@@ -14,7 +15,18 @@ detects the Huion H951P.
 - `ydotool` for mouse click and scroll actions
 - `hyprctl` only when using `hyprctl:` actions
 
-The `keys scan` command prints each decoded Linux key code only on its first press. The `keys raw-scan` command reads the vendor-specific HID interface used by the official Huion driver and prints raw reports plus changed byte positions. Use `raw-scan` when the decoded evdev keyboard device does not report the tablet buttons. Stop either scan with `Ctrl+C`.
+The `keys scan` command prints each decoded Linux key code only on its first
+press. The `keys raw-scan` command reads the vendor-specific HID interface used
+by the official Huion driver and prints raw reports plus changed byte
+positions. Stop either scan with `Ctrl+C`.
+
+On some systems (including the one this was built on), the vendor HID
+interface stays silent and the express keys report as ordinary keyboard keys
+through the tablet's keyboard device — pressing top-button4 here emits
+`KEY_I`. Find out what your buttons emit by stopping the daemon and running
+`keys scan`, then bind those names (`KEY_I`, `KEY_E`, ...) in the config. The
+daemon grabs the tablet keyboard device, so the native letters the buttons
+would type are suppressed and only the configured actions run.
 
 For the H951P, the report state is part of the button identity:
 
@@ -30,11 +42,17 @@ state 0xe0: 0x0008 top-button1        0x0010 top-button2
 state 0xf1: 0x0100 scroll-up         0x0200 scroll-down
 ```
 
-For H951P, `daemon` prefers the vendor-specific HID interface and maps these
-button names or numeric values (`0x0080`, `128`, etc.). Use names for scroll
-actions because the same bitmap values can have different meanings in different
-report states. It falls back to the decoded evdev keyboard interface when raw
-HID is unavailable. The legacy names `KEY_PROG1` through `KEY_PROG4` and `KEY_F13` through `KEY_F16` are also accepted as aliases for the top and bottom buttons.
+For the raw HID path, bindings accept these button names or numeric bitmap
+values (`0x0080`, `128`, etc.). Use names for scroll actions because the same
+bitmap values can have different meanings in different report states. The
+legacy names `KEY_PROG1` through `KEY_PROG4` and `KEY_F13` through `KEY_F16`
+are also accepted as aliases for the top and bottom buttons.
+
+The daemon polls three sources in one non-blocking loop: the vendor HID
+interface, the tablet keyboard device (synced with the raw path), and the pen
+device. If the vendor interface delivers reports, those bindings fire;
+otherwise the keyboard bindings (`KEY_*` names from `keys scan`) do. All
+devices are opened non-blocking so a silent device cannot stall the loop.
 
 Run the daemon as your normal desktop user. Do not use `sudo` on Wayland:
 `wtype` needs the user session variables `XDG_RUNTIME_DIR` and
@@ -91,6 +109,16 @@ huion-mgr config show
 `config generate` writes `$HOME/.config/huion-mgr/config.toml` and refuses to
 overwrite an existing file. Use `huion-mgr config generate --force` to replace
 it. `config.toml.example` in this repository is a complete editable example.
+
+The generated format is compact: actions are inline tables and the pen section
+is one line, so each binding stays readable.
+
+```toml
+[[express_keys]]
+key = "KEY_I"
+name = "top-button4 -> P"
+action = { type = "key", value = "p" }
+```
 
 Example mapping:
 
@@ -163,7 +191,7 @@ huion-mgr keys scan
 # Print unique raw Huion HID reports and changed bytes
 huion-mgr keys raw-scan
 
-# Start the mapping daemon (uses raw HID for H951P)
+# Start the mapping daemon (raw HID + tablet keyboard, grabbed)
 huion-mgr daemon
 ```
 

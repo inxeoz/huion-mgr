@@ -154,10 +154,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Commands::Config { action } => match action.unwrap_or(ConfigAction::Show) {
             ConfigAction::Show => {
                 let config = load_config(&config_path)?;
-                println!(
-                    "{}",
-                    toml::to_string_pretty(&config).map_err(|e| e.to_string())?
-                );
+                print!("{}", crate::config::render_config(&config));
                 Ok(())
             }
             ConfigAction::Generate { force } => {

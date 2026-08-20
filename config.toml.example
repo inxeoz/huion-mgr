@@ -1,11 +1,11 @@
-# huion-mgr v0.1.1 configuration example for the Huion H951P.
-# Copy this file to ~/.config/huion-mgr/config.toml or run:
-#   huion-mgr config generate
+# huion-mgr configuration example for the Huion H951P.
+# Copy to ~/.config/huion-mgr/config.toml or run: huion-mgr config generate
 
 tablet_name = "HUION Huion Tablet_H951P"
 
-# Mode selector buttons change the active mode. They normally do not execute
-# an action themselves.
+# Mode layers. mode1 is active at startup. Entries without `mode` apply to
+# every layer; an entry with `mode` only fires while that layer is active.
+# These three fix the layer without executing an action.
 [[express_keys]]
 key = "mode1"
 name = "Mode 1"
@@ -21,42 +21,60 @@ key = "mode3"
 name = "Mode 3"
 action = { type = "none" }
 
-# Keyboard shortcut actions use wtype.
+# On this machine the express keys surface as plain keyboard keys on the
+# tablet's keyboard interface. `huion-mgr keys scan` prints the real code
+# (KEY_I, KEY_E, ...) each physical button emits; bind those names.
+# Example: the button that emits KEY_I types "p":
 [[express_keys]]
-key = "top-button1"
-name = "Undo in mode 1"
+key = "KEY_I"
+name = "top-button4 -> P"
+action = { type = "key", value = "p" }
+
+# One binding per mode layer shares the same key name.
+[[express_keys]]
+key = "KEY_E"
+name = "Undo / redo / save"
 mode = "mode1"
 action = { type = "combo", value = "ctrl+z" }
 
 [[express_keys]]
-key = "top-button1"
-name = "Redo in mode 2"
+key = "KEY_E"
 mode = "mode2"
+name = "Redo in mode 2"
 action = { type = "combo", value = "ctrl+y" }
 
 [[express_keys]]
-key = "top-button1"
-name = "Save in mode 3"
+key = "KEY_E"
 mode = "mode3"
+name = "Save in mode 3"
 action = { type = "combo", value = "ctrl+s" }
 
 [[express_keys]]
-key = "top-button2"
+key = "KEY_B"
 name = "Next tab"
 action = { type = "combo", value = "ctrl+tab" }
 
-# Single key actions also use wtype.
+# Mouse actions use ydotool; values: left, right, middle.
 [[express_keys]]
-key = "top-button3"
-name = "Enter"
-action = { type = "key", value = "Return" }
+key = "KEY_N"
+name = "Left click"
+action = { type = "mouse", value = "left" }
 
+# Shell commands run through sh -c. Only use trusted commands.
+# KEY_U and KEY_H are placeholders: replace with the codes keys scan prints.
 [[express_keys]]
-key = "top-button4"
-name = "P key"
-action = { type = "key", value = "p" }
+key = "KEY_U"
+name = "Open terminal"
+action = { type = "command", value = "alacritty" }
+
+# Hyprland dispatch actions use hyprctl dispatch.
+[[express_keys]]
+key = "KEY_H"
+name = "Next workspace"
+action = { type = "hyprctl", value = "dispatch workspace e+1" }
 
 # Scroll actions generate mouse-wheel events, not keyboard arrows.
+# Bind them when keys scan shows the wheel's key codes.
 [[express_keys]]
 key = "scroll-up"
 name = "Scroll up"
@@ -67,25 +85,8 @@ key = "scroll-down"
 name = "Scroll down"
 action = { type = "scroll", value = "down" }
 
-# Mouse actions use ydotool. Values: left, right, middle.
-[[express_keys]]
-key = "bottom-button1"
-name = "Left click"
-action = { type = "mouse", value = "left" }
+[pen]
+pressure_curve = [[0.0, 0.0], [0.25, 0.15], [0.5, 0.5], [0.75, 0.85], [1.0, 1.0]]
+output = "all"
 
-[[express_keys]]
-key = "bottom-button2"
-name = "Right click"
-action = { type = "mouse", value = "right" }
-
-# Shell commands run through sh -c. Only use trusted commands.
-[[express_keys]]
-key = "bottom-button3"
-name = "Open terminal"
-action = { type = "command", value = "alacritty" }
-
-# Hyprland dispatch actions use hyprctl dispatch.
-[[express_keys]]
-key = "bottom-button4"
-name = "Next workspace"
-action = { type = "hyprctl", value = "dispatch workspace e+1" }
+[hyprland]
