@@ -51,6 +51,11 @@ key = "top-button3"
 name = "Enter"
 action = { type = "key", value = "Return" }
 
+[[express_keys]]
+key = "top-button4"
+name = "P key"
+action = { type = "key", value = "p" }
+
 # Scroll actions generate mouse-wheel events, not keyboard arrows.
 [[express_keys]]
 key = "scroll-up"
