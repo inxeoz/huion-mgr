@@ -60,6 +60,12 @@ key = "KEY_N"
 name = "Left click"
 action = { type = "mouse", value = "left" }
 
+# Hold a modifier while the button is held: shift, ctrl, alt, super, meta.
+[[express_keys]]
+key = "KEY_O"
+name = "Shift (hold)"
+action = { type = "hold", value = "shift" }
+
 # Shell commands run through sh -c. Only use trusted commands.
 # KEY_U and KEY_H are placeholders: replace with the codes keys scan prints.
 [[express_keys]]

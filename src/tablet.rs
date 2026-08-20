@@ -252,6 +252,13 @@ pub fn find_express_keys(pattern: &str) -> Option<InputDevice> {
         .find(|d| d.device_type == DeviceType::ExpressKeys)
 }
 
+/// Find the tablet mouse device (wheel / pointer emulation).
+pub fn find_mouse_device(pattern: &str) -> Option<InputDevice> {
+    detect_devices(pattern)
+        .into_iter()
+        .find(|d| d.device_type == DeviceType::Mouse)
+}
+
 /// Find the pen device (absolute tablet stylus)
 pub fn find_pen_device(pattern: &str) -> Option<InputDevice> {
     let devices = detect_devices(pattern);

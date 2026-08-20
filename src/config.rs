@@ -64,6 +64,9 @@ pub enum Action {
     /// Simulate a mouse-wheel scroll (up or down).
     #[serde(rename = "scroll")]
     MouseScroll(String),
+    /// Hold a modifier key while the tablet button is held (shift, ctrl, ...).
+    #[serde(rename = "hold")]
+    Hold(String),
     /// Disabled
     #[serde(rename = "none")]
     None,
@@ -92,6 +95,7 @@ impl Action {
             "hyprctl" | "h" => Ok(Self::Hyprctl(value.to_string())),
             "mouse" | "m" => Ok(Self::MouseClick(value.to_string())),
             "scroll" | "wheel" | "s" => Ok(Self::MouseScroll(value.to_string())),
+            "hold" => Ok(Self::Hold(value.to_string())),
             "none" => Err("none does not accept a value; use 'none'".to_string()),
             _ => Err(format!(
                 "unknown action type '{kind}'; use combo, key, command, hyprctl, mouse, scroll, or none"
@@ -237,6 +241,7 @@ fn render_action(action: &Action) -> String {
         Action::Hyprctl(value) => ("hyprctl", value),
         Action::MouseClick(value) => ("mouse", value),
         Action::MouseScroll(value) => ("scroll", value),
+        Action::Hold(value) => ("hold", value),
     };
     format!("{{ type = \"{kind}\", value = {} }}", toml_str(value))
 }
@@ -304,6 +309,10 @@ mod tests {
         assert_eq!(
             Action::parse("scroll:up"),
             Ok(Action::MouseScroll("up".into()))
+        );
+        assert_eq!(
+            Action::parse("hold:shift"),
+            Ok(Action::Hold("shift".into()))
         );
         assert_eq!(Action::parse("none"), Ok(Action::None));
     }

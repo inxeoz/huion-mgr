@@ -1,7 +1,7 @@
 use crate::actions;
-use crate::config::{AppConfig, KeyBinding};
+use crate::config::{Action, AppConfig, KeyBinding};
 use crate::tablet;
-use evdev::{Device, EventType, InputEventKind, Key};
+use evdev::{Device, EventType, InputEventKind, Key, RelativeAxisType};
 use std::collections::HashMap;
 use std::io::Read;
 use std::os::unix::io::AsRawFd;
@@ -28,6 +28,7 @@ fn run_raw(config: &AppConfig, device_info: &tablet::RawHidDevice) -> Result<(),
     let pen_keymap = build_pen_keymap(config);
     let ev_keymap = build_evdev_keymap(config);
     let mut pen = open_pen_device(&config.tablet_name);
+    let mut mouse_ev = open_mouse_device(&config.tablet_name);
     let mut kbd_ev = tablet::find_express_keys(&config.tablet_name).and_then(|info| {
         match open_nonblock(&info.event_path) {
             Ok(mut d) => {
@@ -128,42 +129,16 @@ fn run_raw(config: &AppConfig, device_info: &tablet::RawHidDevice) -> Result<(),
             match kbd.fetch_events() {
                 Ok(events) => {
                     for ev in events {
-                        if ev.event_type() != EventType::KEY {
-                            continue;
-                        }
-                        if let InputEventKind::Key(code) = ev.kind() {
-                            log::debug!("kbd evdev key: {code:?} value={}", ev.value());
-                        }
-                        if ev.value() != 1 {
-                            continue;
-                        }
-                        if let InputEventKind::Key(code) = ev.kind() {
-                            if let Some(b) = ev_keymap.get(&code) {
-                                let mode_ok =
-                                    b.mode.as_deref() == Some(active_mode) || b.mode.is_none();
-                                if mode_ok {
-                                    log::info!(
-                                        "Express key (evdev): {} ({:?}) -> {:?}",
-                                        b.name,
-                                        code,
-                                        b.action
-                                    );
-                                    actions::execute(&b.action);
-                                    continue;
-                                }
-                            }
-                            if let Some(bindings) = pen_keymap.get(&code) {
-                                if let Some(b) = find_pen_binding(bindings, active_mode) {
-                                    log::info!("Pen button (evdev kbd): {} ({:?})", b.name, code);
-                                    actions::execute(&b.action);
-                                }
-                            }
-                        }
+                        dispatch_kbd_event(&ev, &ev_keymap, &pen_keymap, active_mode);
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(e) => log::warn!("kbd evdev read error: {e}"),
             }
+        }
+        // wheel: REL_WHEEL on the tablet mouse device
+        if let Some(mouse) = mouse_ev.as_mut() {
+            poll_wheel(mouse, config, active_mode);
         }
         // also poll pen for pen buttons
         if let Some(pen_dev) = pen.as_mut() {
@@ -265,22 +240,14 @@ fn run_evdev(config: &AppConfig) -> Result<(), String> {
     }
     let keymap = build_evdev_keymap(config);
     log::info!("Mapped {} decoded keys", keymap.len());
+    let pen_keymap = HashMap::new();
+    let mut mouse_ev = open_mouse_device(&config.tablet_name);
 
     loop {
         match device.fetch_events() {
             Ok(events) => {
                 for event in events {
-                    if event.event_type() != EventType::KEY || event.value() != 1 {
-                        continue;
-                    }
-                    if let InputEventKind::Key(code) = event.kind() {
-                        if let Some(binding) = keymap.get(&code) {
-                            log::info!("Express key: {} ({})", binding.name, binding.key);
-                            actions::execute(&binding.action);
-                        } else {
-                            log::debug!("Unmapped key: {:?}", code);
-                        }
-                    }
+                    dispatch_kbd_event(&event, &keymap, &pen_keymap, "mode1");
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -289,13 +256,16 @@ fn run_evdev(config: &AppConfig) -> Result<(), String> {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
+        if let Some(mouse) = mouse_ev.as_mut() {
+            poll_wheel(mouse, config, "mode1");
+        }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
 
-fn build_evdev_keymap(config: &AppConfig) -> HashMap<Key, &KeyBinding> {
+fn build_evdev_keymap(config: &AppConfig) -> HashMap<Key, Vec<&KeyBinding>> {
     use std::str::FromStr;
-    let mut map = HashMap::new();
+    let mut map: HashMap<Key, Vec<&KeyBinding>> = HashMap::new();
     for binding in &config.express_keys {
         let code = if let Ok(key) = Key::from_str(&binding.key) {
             key
@@ -304,7 +274,7 @@ fn build_evdev_keymap(config: &AppConfig) -> HashMap<Key, &KeyBinding> {
         } else {
             continue;
         };
-        map.insert(code, binding);
+        map.entry(code).or_default().push(binding);
     }
     map
 }
@@ -345,6 +315,113 @@ fn find_pen_binding<'a>(bindings: &[&'a KeyBinding], mode: &str) -> Option<&'a K
         .find(|b| b.mode.as_deref() == Some(mode))
         .copied()
         .or_else(|| bindings.iter().find(|b| b.mode.is_none()).copied())
+}
+
+/// Dispatch one keyboard event from the tablet keyboard device.
+fn dispatch_kbd_event(
+    event: &evdev::InputEvent,
+    ev_keymap: &HashMap<Key, Vec<&KeyBinding>>,
+    pen_keymap: &HashMap<Key, Vec<&KeyBinding>>,
+    active_mode: &str,
+) {
+    if event.event_type() != EventType::KEY {
+        return;
+    }
+    let InputEventKind::Key(code) = event.kind() else {
+        return;
+    };
+    log::debug!("kbd evdev key: {code:?} value={}", event.value());
+
+    if let Some(bindings) = ev_keymap.get(&code) {
+        if let Some(b) = find_pen_binding(bindings, active_mode) {
+            if matches!(b.action, Action::Hold(_)) {
+                if event.value() == 0 || event.value() == 1 {
+                    log::info!(
+                        "Hold {}: {code:?} {}",
+                        b.name,
+                        if event.value() == 1 { "down" } else { "up" }
+                    );
+                    actions::hold(&b.action, event.value() == 1);
+                }
+            } else if event.value() == 1 {
+                log::info!(
+                    "Express key (evdev): {} ({code:?}) -> {:?}",
+                    b.name,
+                    b.action
+                );
+                actions::execute(&b.action);
+            }
+            return;
+        }
+    }
+
+    // Pen buttons also arrive on the keyboard device; press only.
+    if event.value() == 1 {
+        if let Some(bindings) = pen_keymap.get(&code) {
+            if let Some(b) = find_pen_binding(bindings, active_mode) {
+                log::info!("Pen button (evdev kbd): {} ({code:?})", b.name);
+                actions::execute(&b.action);
+            }
+        }
+    }
+}
+
+/// Open the tablet mouse device (wheel), grabbing it so the native wheel is
+/// suppressed and only the configured scroll actions fire.
+fn open_mouse_device(pattern: &str) -> Option<Device> {
+    tablet::find_mouse_device(pattern).and_then(|info| match open_nonblock(&info.event_path) {
+        Ok(mut d) => {
+            match d.grab() {
+                Ok(()) => log::info!(
+                    "Grabbed tablet mouse (native wheel suppressed): {}",
+                    info.event_path.display()
+                ),
+                Err(e) => log::warn!(
+                    "Could not grab mouse {} ({}); the native wheel may also fire",
+                    info.event_path.display(),
+                    e
+                ),
+            }
+            Some(d)
+        }
+        Err(_) => None,
+    })
+}
+
+/// Dispatch REL_WHEEL events to the `scroll-up` / `scroll-down` bindings.
+fn poll_wheel(mouse: &mut Device, config: &AppConfig, active_mode: &str) {
+    match mouse.fetch_events() {
+        Ok(events) => {
+            for ev in events {
+                if ev.event_type() != EventType::RELATIVE {
+                    continue;
+                }
+                let InputEventKind::RelAxis(axis) = ev.kind() else {
+                    continue;
+                };
+                if axis != RelativeAxisType::REL_WHEEL || ev.value() == 0 {
+                    continue;
+                }
+                let name = if ev.value() > 0 {
+                    "scroll-up"
+                } else {
+                    "scroll-down"
+                };
+                if let Some(b) = find_wheel_binding(config, name, active_mode) {
+                    log::info!("Wheel ({name}): {}", b.name);
+                    actions::execute(&b.action);
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+        Err(e) => log::warn!("wheel evdev read error: {e}"),
+    }
+}
+
+fn find_wheel_binding<'a>(config: &'a AppConfig, name: &str, mode: &str) -> Option<&'a KeyBinding> {
+    config.express_keys.iter().find(|binding| {
+        binding.key == name && (binding.mode.as_deref() == Some(mode) || binding.mode.is_none())
+    })
 }
 
 /// Open an evdev device in non-blocking mode.
@@ -447,6 +524,7 @@ pub fn show_bindings(config: &AppConfig) {
             crate::config::Action::Hyprctl(dispatch) => format!("hyprctl: {dispatch}"),
             crate::config::Action::MouseClick(button) => format!("mouse: {button}"),
             crate::config::Action::MouseScroll(direction) => format!("scroll: {direction}"),
+            crate::config::Action::Hold(value) => format!("hold: {value}"),
             crate::config::Action::None => "(unbound)".to_string(),
         };
         println!(
@@ -515,7 +593,7 @@ mod tests {
             action: Action::KeyPress("p".into()),
         }];
         let map = build_evdev_keymap(&config);
-        assert_eq!(map.get(&Key::KEY_I).unwrap().name, "top-button4");
+        assert_eq!(map.get(&Key::KEY_I).unwrap()[0].name, "top-button4");
     }
 
     #[test]

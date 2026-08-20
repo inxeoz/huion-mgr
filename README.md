@@ -28,6 +28,12 @@ through the tablet's keyboard device — pressing top-button4 here emits
 daemon grabs the tablet keyboard device, so the native letters the buttons
 would type are suppressed and only the configured actions run.
 
+The wheel sends keyboard events too: on this tablet it is `ctrl+equal`
+(`KEY_EQUAL`) for up and `ctrl+minus` (`KEY_MINUS`) for down. Bind those names
+and give them any action (for example `combo:"ctrl+equal"` to zoom in
+Firefox). Other tablets may report the wheel as `REL_WHEEL` on the tablet
+mouse device; the daemon polls that path as well.
+
 For the H951P, the report state is part of the button identity:
 
 ```text
@@ -48,11 +54,13 @@ bitmap values can have different meanings in different report states. The
 legacy names `KEY_PROG1` through `KEY_PROG4` and `KEY_F13` through `KEY_F16`
 are also accepted as aliases for the top and bottom buttons.
 
-The daemon polls three sources in one non-blocking loop: the vendor HID
-interface, the tablet keyboard device (synced with the raw path), and the pen
-device. If the vendor interface delivers reports, those bindings fire;
-otherwise the keyboard bindings (`KEY_*` names from `keys scan`) do. All
-devices are opened non-blocking so a silent device cannot stall the loop.
+The daemon polls four sources in one non-blocking loop: the vendor HID
+interface, the tablet keyboard device (synced with the raw path), the pen
+device, and the tablet mouse device (for a `REL_WHEEL` wheel). If the vendor
+interface delivers reports, those bindings fire; otherwise the keyboard
+bindings (`KEY_*` names from `keys scan`) do. The keyboard and mouse devices
+are grabbed so native key presses and wheel ticks are suppressed. All devices
+are opened non-blocking so a silent device cannot stall the loop.
 
 Run the daemon as your normal desktop user. Do not use `sudo` on Wayland:
 `wtype` needs the user session variables `XDG_RUNTIME_DIR` and
@@ -153,9 +161,13 @@ A binding without `mode` is the fallback for all modes. Pressing `mode1`,
 `mode2`, or `mode3` selects the active layer. The daemon starts in `mode1`.
 
 `key` and `combo` actions use `wtype`. `mouse` and `scroll` actions use
-`ydotool`. `scroll:up` and `scroll:down` generate mouse-wheel events, while
-`key:Up` and `key:Down` generate keyboard arrow keys. `ydotoold` must be
-running for mouse and scroll actions:
+`ydotool`; `hold` actions also use ydotool. Combos are sent as
+`wtype -M <modifier> -k <key>` — wtype 0.4 has no `+` combo syntax and would
+type the string literally. `scroll:up` and `scroll:down` generate mouse-wheel
+events, `key:Up` and `key:Down` generate keyboard arrow keys, and `hold:shift`
+holds a modifier while the button is pressed (shift, ctrl, alt, super, meta,
+capslock, or an evdev code). `ydotoold` must be running for mouse, scroll, and
+hold actions:
 
 ```bash
 systemctl --user enable --now ydotool.service
@@ -196,8 +208,8 @@ huion-mgr daemon
 ```
 
 Supported action forms are `combo:value`, `key:value`, `command:value`,
-`hyprctl:value`, `mouse:value`, `scroll:value`, and `none`. Short aliases are
-`c`, `k`, `cmd`, `h`, `m`, and `s`.
+`hyprctl:value`, `mouse:value`, `scroll:value`, `hold:value`, and `none`.
+Short aliases are `c`, `k`, `cmd`, `h`, `m`, and `s`.
 
 `config set` supports these scalar values:
 
