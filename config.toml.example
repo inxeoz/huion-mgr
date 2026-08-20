@@ -1,4 +1,4 @@
-# huion-mgr configuration example for the Huion H951P.
+# huion-mgr v0.1.1 configuration example for the Huion H951P.
 # Copy this file to ~/.config/huion-mgr/config.toml or run:
 #   huion-mgr config generate
 
