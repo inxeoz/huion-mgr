@@ -252,20 +252,6 @@ pub fn find_express_keys(pattern: &str) -> Option<InputDevice> {
         .find(|d| d.device_type == DeviceType::ExpressKeys)
 }
 
-/// Find the pen device (absolute tablet stylus)
-pub fn find_pen_device(pattern: &str) -> Option<InputDevice> {
-    let devices = detect_devices(pattern);
-    devices
-        .into_iter()
-        .find(|d| d.device_type == DeviceType::Pen)
-        .or_else(|| {
-            // fallback: any device with pen in name already handled; try mouse that may carry ABS
-            detect_devices(pattern)
-                .into_iter()
-                .find(|d| d.device_type == DeviceType::Mouse)
-        })
-}
-
 /// List all detected tablet devices
 pub fn list_all(pattern: &str) {
     let devices = detect_devices(pattern);

@@ -84,20 +84,3 @@ action = { type = "command", value = "alacritty" }
 key = "bottom-button4"
 name = "Next workspace"
 action = { type = "hyprctl", value = "dispatch workspace e+1" }
-
-# Huion pan: hold button + move pen to drag board (two-finger pan emulation).
-# Like holding space + dragging on a laptop touchpad, it grabs the tablet pen
-# position while the button is held and emits a middle-button drag (or left/right).
-# Needs /dev/uinput permission; daemon creates a virtual mouse. Value formats:
-#   pan            -> middle-drag, sensitivity 1.0
-#   pan:left       -> left-drag (e.g., for apps that pan with left)
-#   pan:1.5        -> faster drag
-#   pan:left:0.8   -> left-drag slower
-# Sensitivity multiplies pen delta; ~0.05 maps full tablet width to ~1920px.
-# Tune per monitor; ponytail: fixed 0.05 base, real screen size needs tuning.
-[[express_keys]]
-key = "bottom-button4"
-name = "Pan board"
-action = { type = "huion", value = "pan" }
-# Hold variant: keep drag only while button held (needs continuous report, not pulse)
-# action = { type = "huion", value = "pan:hold" }

@@ -284,7 +284,6 @@ dependencies = [
  "dirs",
  "env_logger",
  "evdev",
- "libc",
  "log",
  "serde",
  "toml",

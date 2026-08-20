@@ -82,33 +82,6 @@ pub fn execute(action: &Action) {
                 _ => {}
             }
         }
-        Action::Huion(value) => {
-            // Huion drag is handled inside the daemon's hold-loop (pen tracking).
-            // Direct `huion-mgr test` or key without daemon falls back to a hint.
-            log::info!("Huion action '{value}' needs daemon hold; use as express_keys binding while daemon runs");
-        }
         Action::None => {}
     }
-}
-
-/// Parse huion value like `pan`, `pan:left`, `pan:1.5`, `pan:left:0.8`, `pan:hold`, `pan:left:hold:1.5`
-pub fn parse_huion(value: &str) -> (evdev::Key, f32, bool) {
-    let lower = value.to_ascii_lowercase();
-    let button = if lower.contains("left") {
-        evdev::Key::BTN_LEFT
-    } else if lower.contains("right") {
-        evdev::Key::BTN_RIGHT
-    } else {
-        evdev::Key::BTN_MIDDLE
-    };
-    let hold = lower.contains("hold");
-    let mut sensitivity = 1.0f32;
-    for part in lower.split([':', ',', ' ', ';']) {
-        if let Ok(v) = part.parse::<f32>() {
-            if v > 0.0 && v < 20.0 {
-                sensitivity = v;
-            }
-        }
-    }
-    (button, sensitivity, hold)
 }

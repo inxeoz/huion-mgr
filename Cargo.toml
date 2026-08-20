@@ -5,7 +5,6 @@ edition = "2021"
 description = "Huion tablet manager for Linux (CLI + daemon)"
 
 [dependencies]
-libc = "0.2"
 # CLI
 clap = { version = "4", features = ["derive"] }
 
