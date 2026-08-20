@@ -33,7 +33,7 @@ enum Commands {
     /// Listen to all tablet input (evdev + hidraw) and print signatures.
     ReadRaw {
         /// Comma-separated filters to hide: movement,pen,hidraw,evdev,button (e.g. --exclude movement)
-        #[arg(long, value_name="FILTER")]
+        #[arg(long, value_name = "FILTER")]
         exclude: Option<String>,
     },
     /// Show or edit the TOML configuration.
@@ -97,7 +97,7 @@ enum KeyAction {
     /// Listen to all tablet input (evdev + hidraw) and print signatures.
     ReadRaw {
         /// Comma-separated filters to hide: movement,pen,hidraw,evdev,button (e.g. --exclude movement)
-        #[arg(long, value_name="FILTER")]
+        #[arg(long, value_name = "FILTER")]
         exclude: Option<String>,
     },
     /// Execute one configured binding.
@@ -137,12 +137,20 @@ fn run(cli: Cli) -> Result<(), String> {
             } else {
                 println!("Raw HID devices:");
                 for d in raw {
-                    println!("  {} @ {} ({}) vendor_specific={}", d.name, d.hidraw_path.display(), d.phys, d.vendor_specific);
+                    println!(
+                        "  {} @ {} ({}) vendor_specific={}",
+                        d.name,
+                        d.hidraw_path.display(),
+                        d.phys,
+                        d.vendor_specific
+                    );
                 }
             }
             Ok(())
         }
-        Commands::ReadRaw { exclude } => read_raw_all(&load_config(&config_path)?, exclude.as_deref()),
+        Commands::ReadRaw { exclude } => {
+            read_raw_all(&load_config(&config_path)?, exclude.as_deref())
+        }
         Commands::Config { action } => match action.unwrap_or(ConfigAction::Show) {
             ConfigAction::Show => {
                 let config = load_config(&config_path)?;
@@ -240,7 +248,9 @@ fn run(cli: Cli) -> Result<(), String> {
             }
             KeyAction::Scan => scan_keys(&load_config(&config_path)?),
             KeyAction::RawScan => raw_scan_keys(&load_config(&config_path)?),
-            KeyAction::ReadRaw { exclude } => read_raw_all(&load_config(&config_path)?, exclude.as_deref()),
+            KeyAction::ReadRaw { exclude } => {
+                read_raw_all(&load_config(&config_path)?, exclude.as_deref())
+            }
             KeyAction::Test { key, mode } => {
                 let mode = normalize_mode(mode.as_deref())?;
                 let config = load_config(&config_path)?;
@@ -482,7 +492,9 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
     }
 
     let exclude_lower = exclude.unwrap_or("").to_ascii_lowercase();
-    let hide_movement = exclude_lower.contains("movement") || exclude_lower.contains("pen") || exclude_lower.contains("move");
+    let hide_movement = exclude_lower.contains("movement")
+        || exclude_lower.contains("pen")
+        || exclude_lower.contains("move");
     let hide_hidraw = exclude_lower.contains("hidraw");
     let hide_evdev = exclude_lower.contains("evdev");
     let hide_button = exclude_lower.contains("button");
@@ -495,16 +507,31 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
     let raw_devices = tablet::detect_raw_hid(&config.tablet_name);
 
     if ev_devices.is_empty() && raw_devices.is_empty() {
-        return Err(format!("no devices found matching '{}'; try `huion-mgr detect`", config.tablet_name));
+        return Err(format!(
+            "no devices found matching '{}'; try `huion-mgr detect`",
+            config.tablet_name
+        ));
     }
 
     println!("EVDEV devices ({}):", ev_devices.len());
     for d in &ev_devices {
-        println!("  [{:?}] {} @ {} ({})", d.device_type, d.name, d.event_path.display(), d.phys);
+        println!(
+            "  [{:?}] {} @ {} ({})",
+            d.device_type,
+            d.name,
+            d.event_path.display(),
+            d.phys
+        );
     }
     println!("HIDRAW devices ({}):", raw_devices.len());
     for d in &raw_devices {
-        println!("  {} @ {} ({}) vendor_specific={}", d.name, d.hidraw_path.display(), d.phys, d.vendor_specific);
+        println!(
+            "  {} @ {} ({}) vendor_specific={}",
+            d.name,
+            d.hidraw_path.display(),
+            d.phys,
+            d.vendor_specific
+        );
     }
     println!();
 
@@ -515,10 +542,17 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
             Ok(dev) => {
                 set_nb(&dev);
                 println!("[open] evdev {} @ {}", info.name, info.event_path.display());
-                ev_open.push((format!("{} @ {}", info.name, info.event_path.display()), dev));
+                ev_open.push((
+                    format!("{} @ {}", info.name, info.event_path.display()),
+                    dev,
+                ));
             }
             Err(e) => {
-                println!("[fail] evdev {} @ {}: {e} (try `sudo usermod -aG input $USER` and re-login)", info.name, info.event_path.display());
+                println!(
+                    "[fail] evdev {} @ {}: {e} (try `sudo usermod -aG input $USER` and re-login)",
+                    info.name,
+                    info.event_path.display()
+                );
             }
         }
     }
@@ -526,8 +560,10 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
     for (path, dev) in evdev::enumerate() {
         let name = dev.name().unwrap_or("").to_string();
         let lower = name.to_ascii_lowercase();
-        if (lower.contains("virtual") && lower.contains("tablet")) || lower.contains("opentabletdriver") {
-            if ev_open.iter().any(|(n,_)| n.contains(&name)) {
+        if (lower.contains("virtual") && lower.contains("tablet"))
+            || lower.contains("opentabletdriver")
+        {
+            if ev_open.iter().any(|(n, _)| n.contains(&name)) {
                 continue;
             }
             match Device::open(&path) {
@@ -537,7 +573,11 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
                     ev_open.push((format!("{} @ {}", name, path.display()), d));
                 }
                 Err(e) => {
-                    println!("[fail] evdev OTD virtual {} @ {}: {e}", name, path.display());
+                    println!(
+                        "[fail] evdev OTD virtual {} @ {}: {e}",
+                        name,
+                        path.display()
+                    );
                 }
             }
         }
@@ -549,16 +589,26 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
         match std::fs::File::open(&info.hidraw_path) {
             Ok(f) => {
                 set_nb(&f);
-                println!("[open] hidraw {} @ {}", info.name, info.hidraw_path.display());
+                println!(
+                    "[open] hidraw {} @ {}",
+                    info.name,
+                    info.hidraw_path.display()
+                );
                 raw_open.push((info.name.clone(), f, info.hidraw_path.display().to_string()));
             }
             Err(e) => {
-                println!("[fail] hidraw {} @ {}: {e}", info.name, info.hidraw_path.display());
+                println!(
+                    "[fail] hidraw {} @ {}: {e}",
+                    info.name,
+                    info.hidraw_path.display()
+                );
             }
         }
     }
     println!("\n--- listening (evdev shows KEY/ABS/REL, hidraw shows hex + button) ---\n");
-    std::io::stdout().flush().map_err(|e| format!("flush failed: {e}"))?;
+    std::io::stdout()
+        .flush()
+        .map_err(|e| format!("flush failed: {e}"))?;
 
     let mut hid_buf = [0u8; 256];
     let mut hid_prev: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
@@ -585,7 +635,12 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
                         if hide_button && matches!(kind, evdev::InputEventKind::Key(_)) {
                             continue;
                         }
-                        println!("[evdev {label}] {et:?} {kind:?} value={} raw_type={} code={}", ev.value(), ev.event_type().0, ev.code());
+                        println!(
+                            "[evdev {label}] {et:?} {kind:?} value={} raw_type={} code={}",
+                            ev.value(),
+                            ev.event_type().0,
+                            ev.code()
+                        );
                         // also for ABS show more: if pen ABS_X/Y
                         if let evdev::InputEventKind::AbsAxis(_axis) = kind {
                             // axis already in kind
@@ -610,7 +665,8 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
                         continue;
                     }
                     let report = &hid_buf[..len];
-                    let is_pen_hid = matches!(report.get(1), Some(0x80) | Some(0x81)) && report.len() >= 12;
+                    let is_pen_hid =
+                        matches!(report.get(1), Some(0x80) | Some(0x81)) && report.len() >= 12;
                     let is_known_button = tablet::h951p_button_keys(report).is_some();
                     if hide_movement && !is_known_button {
                         hid_prev.insert(path.clone(), report.to_vec());
@@ -625,20 +681,41 @@ fn read_raw_all(config: &AppConfig, exclude: Option<&str>) -> Result<(), String>
                         hid_prev.insert(path.clone(), report.to_vec());
                         continue;
                     }
-                    let hex = report.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
+                    let hex = report
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     let prev = hid_prev.get(path).cloned().unwrap_or_default();
-                    let changed = if prev.is_empty() { "first".to_string() } else { format_changed_bytes(&prev, report) };
+                    let changed = if prev.is_empty() {
+                        "first".to_string()
+                    } else {
+                        format_changed_bytes(&prev, report)
+                    };
                     // state 0x80 hover, 0x81 tip down = pen, 0xe0/0xe3/0xf1 = buttons; don't show unknown button for pen
-                    let is_pen = matches!(report.get(1), Some(0x80) | Some(0x81)) && report.len() >= 12;
-                    let button = if is_pen { String::new() } else { tablet::h951p_button_description(report).map(|d| format!(" | {d}")).unwrap_or_default() };
+                    let is_pen =
+                        matches!(report.get(1), Some(0x80) | Some(0x81)) && report.len() >= 12;
+                    let button = if is_pen {
+                        String::new()
+                    } else {
+                        tablet::h951p_button_description(report)
+                            .map(|d| format!(" | {d}"))
+                            .unwrap_or_default()
+                    };
                     let pen_info = if is_pen {
                         // ponytail: heuristic H951P pen: [id, 0x80, X_L, X_H, Y_L, Y_H, P_L, P_H, tiltX, tiltY, ...]
                         let x = u16::from(report[2]) | (u16::from(report[3]) << 8);
                         let y = u16::from(report[4]) | (u16::from(report[5]) << 8);
                         let p = u16::from(report[6]) | (u16::from(report[7]) << 8);
                         format!(" | pen x={x} y={y} pressure={p}")
-                    } else { String::new() };
-                    let ev_hint = if report.get(0) == Some(&0x08) { " (H951P)" } else { "" };
+                    } else {
+                        String::new()
+                    };
+                    let ev_hint = if report.first() == Some(&0x08) {
+                        " (H951P)"
+                    } else {
+                        ""
+                    };
                     let extra = if !button.is_empty() { button } else { pen_info };
                     println!("[hidraw {name}@{path} len={len} id=0x{:02x}] {hex} | changed: {changed}{extra}{ev_hint}", report[0]);
                     hid_prev.insert(path.clone(), report.to_vec());

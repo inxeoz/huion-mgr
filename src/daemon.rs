@@ -4,6 +4,7 @@ use crate::tablet;
 use evdev::{Device, EventType, InputEventKind, Key};
 use std::collections::HashMap;
 use std::io::Read;
+use std::os::unix::io::AsRawFd;
 
 type HuionKey = (u8, u16);
 
@@ -24,6 +25,33 @@ pub fn run(config: &AppConfig) -> Result<(), String> {
 
 fn run_raw(config: &AppConfig, device_info: &tablet::RawHidDevice) -> Result<(), String> {
     let keymap = build_huion_keymap(config);
+    let pen_keymap = build_pen_keymap(config);
+    let ev_keymap = build_evdev_keymap(config);
+    let mut pen = open_pen_device(&config.tablet_name);
+    let mut kbd_ev = tablet::find_express_keys(&config.tablet_name).and_then(|info| {
+        match open_nonblock(&info.event_path) {
+            Ok(mut d) => {
+                match d.grab() {
+                    Ok(()) => log::info!(
+                        "Grabbed tablet kbd (native keys suppressed): {}",
+                        info.event_path.display()
+                    ),
+                    Err(e) => log::warn!(
+                        "Could not grab {} ({}); tablet buttons may also type their native keys",
+                        info.event_path.display(),
+                        e
+                    ),
+                }
+                log::info!(
+                    "Huion kbd evdev (raw fallback): {} @ {}",
+                    info.name,
+                    info.event_path.display()
+                );
+                Some(d)
+            }
+            Err(_) => None,
+        }
+    });
     let mut device = std::fs::File::open(&device_info.hidraw_path)
         .map_err(|error| format!("cannot open {}: {error}", device_info.hidraw_path.display()))?;
 
@@ -43,48 +71,122 @@ fn run_raw(config: &AppConfig, device_info: &tablet::RawHidDevice) -> Result<(),
     let mut previous_keys = std::collections::HashSet::new();
     let mut buffer = [0u8; 256];
     loop {
-        let length = device
-            .read(&mut buffer)
-            .map_err(|error| format!("raw HID read error: {error}"))?;
-        let report = &buffer[..length];
-        let current_keys = tablet::h951p_button_keys(report)
-            .unwrap_or_default()
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
+        // Vendor reports may never arrive (buttons then come through the
+        // tablet's keyboard interface), so poll instead of blocking forever.
+        let mut pollfd = libc::pollfd {
+            fd: device.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut pollfd, 1, 50) };
+        if ready > 0 && pollfd.revents & libc::POLLIN != 0 {
+            let length = device
+                .read(&mut buffer)
+                .map_err(|error| format!("raw HID read error: {error}"))?;
+            let report = &buffer[..length];
+            let current_keys = tablet::h951p_button_keys(report)
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>();
 
-        for key in &current_keys {
-            let is_new_press = !previous_keys.contains(key);
-            // Wheel reports are pulses. The same raw state can be emitted for
-            // multiple ticks, so dispatch every report instead of only the
-            // first edge. Physical buttons remain edge-triggered.
-            if !is_new_press && !is_scroll_key(*key) {
-                continue;
+            for key in &current_keys {
+                let is_new_press = !previous_keys.contains(key);
+                // Wheel reports are pulses. The same raw state can be emitted for
+                // multiple ticks, so dispatch every report instead of only the
+                // first edge. Physical buttons remain edge-triggered.
+                if !is_new_press && !is_scroll_key(*key) {
+                    continue;
+                }
+
+                if let Some(mode) = mode_for_key(*key) {
+                    active_mode = mode;
+                    log::info!("Active Huion mode: {active_mode}");
+                    continue;
+                }
+
+                if let Some(binding) = find_huion_binding(&keymap, *key, active_mode) {
+                    log::info!(
+                        "Huion button: {} [{}] (state=0x{:02x}, bitmap=0x{:04x})",
+                        binding.name,
+                        active_mode,
+                        key.0,
+                        key.1
+                    );
+                    actions::execute(&binding.action);
+                } else {
+                    log::debug!(
+                        "Unmapped Huion button: state=0x{:02x}, bitmap=0x{:04x}, mode={active_mode}",
+                        key.0,
+                        key.1
+                    );
+                }
             }
-
-            if let Some(mode) = mode_for_key(*key) {
-                active_mode = mode;
-                log::info!("Active Huion mode: {active_mode}");
-                continue;
-            }
-
-            if let Some(binding) = find_huion_binding(&keymap, *key, active_mode) {
-                log::info!(
-                    "Huion button: {} [{}] (state=0x{:02x}, bitmap=0x{:04x})",
-                    binding.name,
-                    active_mode,
-                    key.0,
-                    key.1
-                );
-                actions::execute(&binding.action);
-            } else {
-                log::debug!(
-                    "Unmapped Huion button: state=0x{:02x}, bitmap=0x{:04x}, mode={active_mode}",
-                    key.0,
-                    key.1
-                );
+            previous_keys = current_keys.clone();
+        }
+        // also poll kbd evdev for pen-button and for top-button4 fallback (KEY_I)
+        if let Some(kbd) = kbd_ev.as_mut() {
+            match kbd.fetch_events() {
+                Ok(events) => {
+                    for ev in events {
+                        if ev.event_type() != EventType::KEY {
+                            continue;
+                        }
+                        if let InputEventKind::Key(code) = ev.kind() {
+                            log::debug!("kbd evdev key: {code:?} value={}", ev.value());
+                        }
+                        if ev.value() != 1 {
+                            continue;
+                        }
+                        if let InputEventKind::Key(code) = ev.kind() {
+                            if let Some(b) = ev_keymap.get(&code) {
+                                let mode_ok =
+                                    b.mode.as_deref() == Some(active_mode) || b.mode.is_none();
+                                if mode_ok {
+                                    log::info!(
+                                        "Express key (evdev): {} ({:?}) -> {:?}",
+                                        b.name,
+                                        code,
+                                        b.action
+                                    );
+                                    actions::execute(&b.action);
+                                    continue;
+                                }
+                            }
+                            if let Some(bindings) = pen_keymap.get(&code) {
+                                if let Some(b) = find_pen_binding(bindings, active_mode) {
+                                    log::info!("Pen button (evdev kbd): {} ({:?})", b.name, code);
+                                    actions::execute(&b.action);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => log::warn!("kbd evdev read error: {e}"),
             }
         }
-        previous_keys = current_keys;
+        // also poll pen for pen buttons
+        if let Some(pen_dev) = pen.as_mut() {
+            match pen_dev.fetch_events() {
+                Ok(events) => {
+                    for ev in events {
+                        if let InputEventKind::Key(k) = ev.kind() {
+                            if ev.value() == 1 {
+                                if let Some(bindings) = pen_keymap.get(&k) {
+                                    if let Some(b) = find_pen_binding(bindings, active_mode) {
+                                        log::info!("Pen button: {} ({:?})", b.name, k);
+                                        actions::execute(&b.action);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => log::warn!("pen evdev read error: {e}"),
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
 
@@ -150,14 +252,20 @@ fn run_evdev(config: &AppConfig) -> Result<(), String> {
         device_info.event_path.display()
     );
 
-    let device = Device::open(&device_info.event_path)
+    let mut device = open_nonblock(&device_info.event_path)
         .map_err(|e| format!("Cannot open {}: {}", device_info.event_path.display(), e))?;
 
     log::info!("Device: {}", device.name().unwrap_or("unknown"));
+    match device.grab() {
+        Ok(()) => log::info!("Grabbed express keys (native keys suppressed)"),
+        Err(e) => log::warn!(
+            "Could not grab express keys ({}); tablet buttons may also type their native keys",
+            e
+        ),
+    }
     let keymap = build_evdev_keymap(config);
     log::info!("Mapped {} decoded keys", keymap.len());
 
-    let mut device = device;
     loop {
         match device.fetch_events() {
             Ok(events) => {
@@ -186,16 +294,11 @@ fn run_evdev(config: &AppConfig) -> Result<(), String> {
 }
 
 fn build_evdev_keymap(config: &AppConfig) -> HashMap<Key, &KeyBinding> {
+    use std::str::FromStr;
     let mut map = HashMap::new();
     for binding in &config.express_keys {
-        let code = if binding.key.starts_with("KEY_") || binding.key.starts_with("BTN_") {
-            match key_name_to_code(&binding.key) {
-                Some(code) => Key::new(code),
-                None => {
-                    log::warn!("Unknown key identifier: {}", binding.key);
-                    continue;
-                }
-            }
+        let code = if let Ok(key) = Key::from_str(&binding.key) {
+            key
         } else if let Ok(n) = binding.key.parse::<u16>() {
             Key::new(n)
         } else {
@@ -204,6 +307,84 @@ fn build_evdev_keymap(config: &AppConfig) -> HashMap<Key, &KeyBinding> {
         map.insert(code, binding);
     }
     map
+}
+
+fn build_pen_keymap(config: &AppConfig) -> HashMap<Key, Vec<&KeyBinding>> {
+    let mut map: HashMap<Key, Vec<&KeyBinding>> = HashMap::new();
+    for binding in &config.express_keys {
+        let key = binding.key.trim();
+        let lower = key.to_ascii_lowercase().replace('_', "-");
+        let code = if matches!(
+            lower.as_str(),
+            "pen-button1" | "pen1" | "stylus" | "btn-stylus"
+        ) {
+            Key::new(331)
+        } else if matches!(
+            lower.as_str(),
+            "pen-button2" | "pen2" | "stylus2" | "btn-stylus2"
+        ) {
+            Key::new(332)
+        } else if let Some(c) = key_name_to_code(&key.to_ascii_uppercase().replace('-', "_")) {
+            let k = Key::new(c);
+            if k == Key::new(331) || k == Key::new(332) {
+                k
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+        map.entry(code).or_default().push(binding);
+    }
+    map
+}
+
+fn find_pen_binding<'a>(bindings: &[&'a KeyBinding], mode: &str) -> Option<&'a KeyBinding> {
+    bindings
+        .iter()
+        .find(|b| b.mode.as_deref() == Some(mode))
+        .copied()
+        .or_else(|| bindings.iter().find(|b| b.mode.is_none()).copied())
+}
+
+/// Open an evdev device in non-blocking mode.
+///
+/// Without O_NONBLOCK, `fetch_events` blocks the whole daemon loop on the
+/// first device that has no events (e.g. a pen that is not in use).
+fn open_nonblock(path: &std::path::Path) -> std::io::Result<Device> {
+    let d = Device::open(path)?;
+    let _ = unsafe { libc::fcntl(d.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) };
+    Ok(d)
+}
+
+fn open_pen_device(pattern: &str) -> Option<Device> {
+    for (path, dev) in evdev::enumerate() {
+        let name = dev.name().unwrap_or("").to_string();
+        let lower = name.to_ascii_lowercase();
+        if (lower.contains("virtual") && lower.contains("tablet"))
+            || lower.contains("opentabletdriver")
+        {
+            if let Ok(d) = open_nonblock(&path) {
+                log::info!(
+                    "Huion pen device (OTD virtual): {} @ {}",
+                    name,
+                    path.display()
+                );
+                return Some(d);
+            }
+        }
+    }
+    if let Some(info) = tablet::find_pen_device(pattern) {
+        if let Ok(d) = open_nonblock(&info.event_path) {
+            log::info!(
+                "Huion pen device: {} @ {}",
+                info.name,
+                info.event_path.display()
+            );
+            return Some(d);
+        }
+    }
+    None
 }
 
 /// Map common key names to their evdev codes.
@@ -280,8 +461,11 @@ pub fn show_bindings(config: &AppConfig) {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_huion_keymap, find_huion_binding, mode_for_key, parse_number};
+    use super::{
+        build_evdev_keymap, build_huion_keymap, find_huion_binding, mode_for_key, parse_number,
+    };
     use crate::config::{Action, AppConfig, KeyBinding};
+    use evdev::Key;
 
     #[test]
     fn parses_decimal_and_hex_huion_codes() {
@@ -319,6 +503,19 @@ mod tests {
                 .name,
             "fallback"
         );
+    }
+
+    #[test]
+    fn evdev_keymap_resolves_linux_key_names() {
+        let mut config = AppConfig::default();
+        config.express_keys = vec![KeyBinding {
+            key: "KEY_I".into(),
+            name: "top-button4".into(),
+            mode: None,
+            action: Action::KeyPress("p".into()),
+        }];
+        let map = build_evdev_keymap(&config);
+        assert_eq!(map.get(&Key::KEY_I).unwrap().name, "top-button4");
     }
 
     #[test]
